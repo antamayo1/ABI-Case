@@ -2,3 +2,4 @@ pandas==2.3.1
 streamlit[auth]
 openpyxl==3.1.5
 authLib
+openai
