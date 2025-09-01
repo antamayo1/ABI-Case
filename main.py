@@ -3,6 +3,7 @@ import pandas as pd
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import coordinate_to_tuple
 from io import BytesIO
+import math
 
 fill = PatternFill(start_color="B8CCE4", end_color="B8CCE4", fill_type="solid")
 sec_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
@@ -230,11 +231,10 @@ def addMainTable(worksheet, rooms):
       worksheet[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
       worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8)
       for product_type in subs[sub]:
-
         model_string = f'''BRAND: {st.session_state.details.iloc[pl-1].loc['Brand']}
 NAME: {st.session_state.details.iloc[pl-1].loc['Product Name']}
 SKU: {st.session_state.details.iloc[pl-1].loc['Product Code #']}'''
-
+        
         worksheet[f'F{row}'] = model_string
         worksheet[f'F{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'F{row}'].font = Font(name='Avenir Book', size=8)
@@ -268,10 +268,23 @@ SKU: {st.session_state.details.iloc[pl-1].loc['Product Code #']}'''
         worksheet[f'C{row}'] = product_type
         worksheet[f'C{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'C{row}'].font = Font(name='Avenir Book', size=8)
-        worksheet.row_dimensions[row].height = 75
+
+        cell_value_1 = worksheet[f'F{row}'].value or ""
+        cell_value_2 = worksheet[f'I{row}'].value or ""
+        lines = max(cell_value_1.count('\n'), cell_value_2.count('\n')) + 1
+        approx_lines = max(lines, math.ceil(len(cell_value_1) / 40))
+        worksheet.row_dimensions[row].height = 15 * approx_lines 
+
         pl += 1
         row += 1
       worksheet.merge_cells(f'A{start}:A{row-1}')
+      is_last_main = list(rooms.keys())[-1] == main
+      is_last_sub = list(subs.keys())[-1] == sub
+      if not (is_last_main or is_last_sub):
+        worksheet.merge_cells(f'A{row}:K{row}')
+        worksheet.row_dimensions[row].height = 4.5
+        worksheet[f'A{row}'].fill = sec_fill
+        row += 1
   worksheet = box_fill(worksheet, f'A7', f'K{row-1}')
   return worksheet
 
