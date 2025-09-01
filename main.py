@@ -1,9 +1,18 @@
 import streamlit as st
+from openai import OpenAI
 import pandas as pd
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.cell.text import InlineFont
+from openpyxl.cell.rich_text import TextBlock, CellRichText
 from openpyxl.utils import coordinate_to_tuple
 from io import BytesIO
-import math
+from functools import cache
+
+AI_outputs = {}
+
+AI_client = OpenAI(
+  api_key=st.secrets["OPEN_AI_KEY"]
+)
 
 fill = PatternFill(start_color="B8CCE4", end_color="B8CCE4", fill_type="solid")
 sec_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
@@ -215,6 +224,46 @@ def createHeader(worksheet):
   worksheet = mainTableHeaders(worksheet)
   return worksheet
 
+@cache
+def getSupplier(supplier):
+  print(f'Getting supplier information for: {supplier}')
+  response = AI_client.chat.completions.create(
+      model="gpt-3.5-turbo",
+      messages=[
+        {
+          "role": "system",
+          "content": (
+            "You are an expert at extracting structured data from unstructured text. "
+            "You always follow instructions exactly and never add extra commentary."
+          )
+        },
+        {
+          "role": "user",
+          "content": f'''
+  Extract the following details from the text below:
+  - company name
+  - salesperson
+  - email
+  - phone number
+
+  Format your response as:
+  company name>salesperson>email>phone number
+
+  Rules:
+  - Respond with ONLY the string in the format above, with exactly 3 '>' characters.
+  - If any detail is missing, leave it blank but keep the separators (e.g. "company name>>email>").
+  - Do NOT add any explanation, label, or extra text—just the string.
+
+  Text:
+  {supplier}
+  '''
+        }
+      ],
+      temperature=0.15
+  )
+
+  return response.choices[0].message.content
+
 def addMainTable(worksheet, rooms):
   row = 7
   pl = 1
@@ -231,11 +280,16 @@ def addMainTable(worksheet, rooms):
       worksheet[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
       worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8)
       for product_type in subs[sub]:
-        model_string = f'''BRAND: {st.session_state.details.iloc[pl-1].loc['Brand']}
-NAME: {st.session_state.details.iloc[pl-1].loc['Product Name']}
-SKU: {st.session_state.details.iloc[pl-1].loc['Product Code #']}'''
-        
-        worksheet[f'F{row}'] = model_string
+        stringSample = CellRichText(
+          TextBlock(InlineFont(b=True), 'BRAND: '),
+          f'{st.session_state.details.iloc[pl-1].loc['Brand']}\n',
+          TextBlock(InlineFont(b=True), 'NAME: '),
+          f'{st.session_state.details.iloc[pl-1].loc['Product Name']}\n',
+          TextBlock(InlineFont(b=True), 'SKU: '),
+          f'{st.session_state.details.iloc[pl-1].loc['Product Code #']}\n',
+        )
+
+        worksheet[f'F{row}'] = stringSample
         worksheet[f'F{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'F{row}'].font = Font(name='Avenir Book', size=8)
 
@@ -253,7 +307,15 @@ SKU: {st.session_state.details.iloc[pl-1].loc['Product Code #']}'''
         worksheet[f'G{row}'].font = Font(name='Avenir Book', size=8)
 
         worksheet.merge_cells(f'I{row}:J{row}')
-        worksheet[f'I{row}'] = st.session_state.details.iloc[pl-1].loc['Supplier']
+
+        supplier_string = getSupplier(st.session_state.details.iloc[pl-1].loc['Supplier'])
+        details = [item.strip() for item in supplier_string.split('>') if item.strip()]
+        finalString = CellRichText(
+          TextBlock(InlineFont(b=True), f'{details[0]}\n'),
+          '\n'.join(details[1:])
+        )
+
+        worksheet[f'I{row}'] = finalString
         worksheet[f'I{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'I{row}'].font = Font(name='Avenir Book', size=8)
 
@@ -269,11 +331,7 @@ SKU: {st.session_state.details.iloc[pl-1].loc['Product Code #']}'''
         worksheet[f'C{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'C{row}'].font = Font(name='Avenir Book', size=8)
 
-        cell_value_1 = worksheet[f'F{row}'].value or ""
-        cell_value_2 = worksheet[f'I{row}'].value or ""
-        lines = max(cell_value_1.count('\n'), cell_value_2.count('\n')) + 1
-        approx_lines = max(lines, math.ceil(len(cell_value_1) / 40))
-        worksheet.row_dimensions[row].height = 15 * approx_lines 
+        worksheet.row_dimensions[row].height = 150
 
         pl += 1
         row += 1
@@ -339,18 +397,19 @@ else:
     st.write(st.session_state.details)
     newDataframe = pd.DataFrame()
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-      newDataframe.to_excel(writer, index=False, sheet_name='PLUMBING')
-      worksheet = writer.sheets['PLUMBING']
-      worksheet.font = Font(name='Avenir Book')
-      worksheet = createHeader(worksheet)
-      worksheet = addMainTable(worksheet, st.session_state.rooms)
-    output.seek(0)
-    st.download_button(
-      label="Download Formatted Excel File",
-      data=output,
-      file_name="test.xlsx",
-      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    with st.spinner("Generating formatted Excel file..."):
+      with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        newDataframe.to_excel(writer, index=False, sheet_name='PLUMBING')
+        worksheet = writer.sheets['PLUMBING']
+        worksheet.font = Font(name='Avenir Book')
+        worksheet = createHeader(worksheet)
+        worksheet = addMainTable(worksheet, st.session_state.rooms)
+      output.seek(0)
+      st.download_button(
+        label="Download Formatted Excel File",
+        data=output,
+        file_name="test.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      )
   else:
     st.info("Please upload a schedule file to proceed.")
