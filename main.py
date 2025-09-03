@@ -1,12 +1,15 @@
+from openpyxl import load_workbook
 import streamlit as st
 from openai import OpenAI
 import pandas as pd
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.cell.text import InlineFont
+from openpyxl.drawing.image import Image as OpenpyxlImage
 from openpyxl.cell.rich_text import TextBlock, CellRichText
-from openpyxl.utils import coordinate_to_tuple
+from openpyxl.utils import coordinate_to_tuple, get_column_letter
 from io import BytesIO
 from functools import cache
+from PIL import Image as PILImage
 
 AI_outputs = {}
 
@@ -18,6 +21,37 @@ fill = PatternFill(start_color="B8CCE4", end_color="B8CCE4", fill_type="solid")
 sec_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
 
 st.set_page_config(page_title="Design Transformer", layout="wide")
+
+def get_image_anchor(img):
+  anchor = img.anchor
+  if hasattr(anchor, '_from'):
+    col = anchor._from.col + 1
+    row = anchor._from.row + 1
+    return f"{get_column_letter(col)}{row}"
+  elif hasattr(anchor, 'cell'):
+    return anchor.cell
+  else:
+    return str(anchor)
+
+def create_blank_image():
+  img = PILImage.new('RGBA', (1, 1), (255, 255, 255, 0))  # 1x1 transparent
+  buf = BytesIO()
+  img.save(buf, format='PNG')
+  buf.seek(0)
+  return OpenpyxlImage(buf)
+
+def pad_images_with_blanks(images, total_rows):
+  expected_cells = [f'E{idx}' for idx in range(11, total_rows + 11)]
+  actual_anchors = [get_image_anchor(img) for img in images]
+  padded_images = []
+  img_idx = 0
+  for cell in expected_cells:
+    if img_idx < len(images) and actual_anchors[img_idx] == cell:
+      padded_images.append(images[img_idx])
+      img_idx += 1
+    else:
+      padded_images.append(create_blank_image())
+  return padded_images
 
 def box(worksheet, start_cell, end_cell, border_style="thin"):
   side = Side(border_style=border_style, color="000000")
@@ -226,7 +260,6 @@ def createHeader(worksheet):
 
 @cache
 def getSupplier(supplier):
-  print(f'Getting supplier information for: {supplier}')
   response = AI_client.chat.completions.create(
       model="gpt-3.5-turbo",
       messages=[
@@ -264,7 +297,14 @@ def getSupplier(supplier):
 
   return response.choices[0].message.content
 
-def addMainTable(worksheet, rooms):
+def addMainTable(worksheet, rooms, file):
+  images = load_workbook(file).worksheets[0]._images[1:]
+  total_rows = 0
+  for room in rooms:
+    for sub in rooms[room]:
+      for _ in rooms[room][sub]:
+        total_rows += 1
+  images = pad_images_with_blanks(images, total_rows)
   row = 7
   pl = 1
   for main, subs in rooms.items():
@@ -282,17 +322,16 @@ def addMainTable(worksheet, rooms):
       for product_type in subs[sub]:
         stringSample = CellRichText(
           TextBlock(InlineFont(b=True), 'BRAND: '),
-          f'{st.session_state.details.iloc[pl-1].loc['Brand']}\n',
+          f'{st.session_state.details.iloc[pl-1].loc['Brand'] if pd.notna(st.session_state.details.iloc[pl-1].loc['Brand']) else 'Not Provided'}\n',
           TextBlock(InlineFont(b=True), 'NAME: '),
-          f'{st.session_state.details.iloc[pl-1].loc['Product Name']}\n',
+          f'{st.session_state.details.iloc[pl-1].loc['Product Name'] if pd.notna(st.session_state.details.iloc[pl-1].loc['Product Name']) else 'Not Provided'}\n',
           TextBlock(InlineFont(b=True), 'SKU: '),
-          f'{st.session_state.details.iloc[pl-1].loc['Product Code #']}\n',
+          f'{st.session_state.details.iloc[pl-1].loc['Product Code #'] if pd.notna(st.session_state.details.iloc[pl-1].loc['Product Code #']) else 'Not Provided'}\n',
         )
 
         worksheet[f'F{row}'] = stringSample
         worksheet[f'F{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'F{row}'].font = Font(name='Avenir Book', size=8)
-
 
         worksheet[f'D{row}'] = st.session_state.details.iloc[pl-1].loc['QTY (per Area)']
         worksheet[f'D{row}'].alignment = Alignment(horizontal='center', vertical='center')
@@ -309,11 +348,14 @@ def addMainTable(worksheet, rooms):
         worksheet.merge_cells(f'I{row}:J{row}')
 
         supplier_string = getSupplier(st.session_state.details.iloc[pl-1].loc['Supplier'])
+        # supplier_string = "Patani Inc.>John Doe>john@example.com>123-456-7890"
         details = [item.strip() for item in supplier_string.split('>') if item.strip()]
         finalString = CellRichText(
           TextBlock(InlineFont(b=True), f'{details[0]}\n'),
           '\n'.join(details[1:])
         )
+
+        worksheet.add_image(images[pl-1], f'E{row}')
 
         worksheet[f'I{row}'] = finalString
         worksheet[f'I{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -401,10 +443,19 @@ else:
       with pd.ExcelWriter(output, engine='openpyxl') as writer:
         newDataframe.to_excel(writer, index=False, sheet_name='PLUMBING')
         worksheet = writer.sheets['PLUMBING']
-        worksheet.font = Font(name='Avenir Book')
         worksheet = createHeader(worksheet)
-        worksheet = addMainTable(worksheet, st.session_state.rooms)
+        worksheet = addMainTable(worksheet, st.session_state.rooms, st.session_state.input_file)
+        worksheet.page_setup.fitToPage = True
+        worksheet.page_setup.fitToWidth = 1
+        worksheet.page_setup.fitToHeight = False
+        worksheet.page_margins.left = 0.2
+        worksheet.page_margins.right = 0.2
+        worksheet.page_margins.top = 0.2
+        worksheet.page_margins.bottom = 0.2
+        worksheet.page_setup.orientation = 'landscape'
+        worksheet.page_setup.paperSize = 9
       output.seek(0)
+      st.session_state.output = output
       st.download_button(
         label="Download Formatted Excel File",
         data=output,
