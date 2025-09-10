@@ -163,13 +163,13 @@ def headerBorders(worksheet):
   worksheet = box_fill(worksheet, 'I1', 'K4')
   return worksheet
 
-def addHeaderValues(worksheet):
+def addHeaderValues(worksheet, projectName):
   worksheet.merge_cells('A1:B4')
   logo = padLogoImage('abi-logo.webp')
   worksheet.add_image(logo, 'A1')
 
   worksheet.merge_cells('E1:F2')
-  worksheet['E1'] = "45 CLAPBOARD HILL ROAD"
+  worksheet['E1'] = f"{projectName.upper()}"
   worksheet['E1'].font = Font(name='Avenir Book', size=14, bold=True)
   worksheet['E1'].alignment = Alignment(horizontal='center', vertical='center')
 
@@ -293,10 +293,10 @@ def mainTableHeaders(worksheet):
 
   return worksheet
 
-def createHeader(worksheet):
+def createHeader(worksheet, projectName):
   worksheet = columnRowDimensions(worksheet)
   worksheet = headerBorders(worksheet)
-  worksheet = addHeaderValues(worksheet)
+  worksheet = addHeaderValues(worksheet, projectName)
   worksheet = mainTableHeaders(worksheet)
   return worksheet
 
@@ -465,6 +465,9 @@ else:
   with st.expander("Upload Schedule", expanded=True):
     st.session_state.input_file = st.file_uploader("Please input the raw export file", type=["xlsx", "xls"])
   if st.session_state.input_file:
+    [projectName, ext] = st.session_state.input_file.name.split('-')
+    projectName = projectName.strip()
+    projectCategory = ext.split('Fohlio')[0].strip()
     st.session_state.details = pd.read_excel(st.session_state.input_file, header=9)
     st.session_state.rooms = {}
     for idx, roomName in enumerate(st.session_state.details['Area']):
@@ -484,9 +487,9 @@ else:
     output = BytesIO()
     with st.spinner("Generating formatted Excel file..."):
       with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        newDataframe.to_excel(writer, index=False, sheet_name='PLUMBING')
-        worksheet = writer.sheets['PLUMBING']
-        worksheet = createHeader(worksheet)
+        newDataframe.to_excel(writer, index=False, sheet_name=projectCategory)
+        worksheet = writer.sheets[projectCategory]
+        worksheet = createHeader(worksheet, projectName)
         worksheet = addMainTable(worksheet, st.session_state.rooms, st.session_state.input_file)
         worksheet.page_setup.fitToPage = True
         worksheet.page_setup.fitToWidth = 1
