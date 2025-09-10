@@ -4,7 +4,7 @@ from openai import OpenAI
 import pandas as pd
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.cell.text import InlineFont
-from openpyxl.drawing.image import Image as OpenpyxlImage
+from openpyxl.drawing.image import Image
 from openpyxl.cell.rich_text import TextBlock, CellRichText
 from openpyxl.utils import coordinate_to_tuple, get_column_letter
 from io import BytesIO
@@ -38,7 +38,7 @@ def create_blank_image():
   buf = BytesIO()
   img.save(buf, format='PNG')
   buf.seek(0)
-  return OpenpyxlImage(buf)
+  return Image(buf)
 
 def pad_images_with_blanks(images, total_rows):
   expected_cells = [f'E{idx}' for idx in range(11, total_rows + 11)]
@@ -91,6 +91,49 @@ def box_fill(worksheet, start_cell, end_cell, border_style="thin"):
       cell.border = border
   return worksheet
 
+def padLogoImage(img):
+  pil_img = PILImage.open(img)
+  padding_left = 160
+  padding_right = 160
+  padding_top = 120
+  padding_bottom = 120
+  new_width = pil_img.width + padding_left + padding_right
+  new_height = pil_img.height + padding_top + padding_bottom
+  padded_img = PILImage.new('RGBA', (new_width, new_height), (255, 255, 255, 0))
+  padded_img.paste(pil_img, (padding_left, padding_top), pil_img if pil_img.mode == 'RGBA' else None)
+  buf = BytesIO()
+  padded_img.save(buf, format='PNG')
+  buf.seek(0)
+  img = Image(buf)
+  img.width = 195
+  img.height = 95
+  return img
+
+def padProductImage(image):
+    pil_img = PILImage.open(image.ref)
+    
+    padding_left = 40
+    padding_right = 40
+    padding_top = 20
+    padding_bottom = 20
+    
+    new_width = pil_img.width + padding_left + padding_right
+    new_height = pil_img.height + padding_top + padding_bottom
+    padded_img = PILImage.new('RGBA', (new_width, new_height), (255, 255, 255, 0))
+    
+    padded_img.paste(pil_img, (padding_left, padding_top), pil_img if pil_img.mode == 'RGBA' else None)
+    
+    buf = BytesIO()
+    padded_img.save(buf, format='PNG')
+    buf.seek(0)
+    
+    new_img = Image(buf)
+
+    new_img.width = 182
+    new_img.height = 200
+    
+    return new_img
+
 def columnRowDimensions(worksheet):
   worksheet.column_dimensions['A'].width = 14.78 * 1.4
   worksheet.column_dimensions['B'].width = 4.56 * 1.4
@@ -122,9 +165,8 @@ def headerBorders(worksheet):
 
 def addHeaderValues(worksheet):
   worksheet.merge_cells('A1:B4')
-  worksheet['A1'] = "LOGO"
-  worksheet['A1'].font = Font(name='Avenir Book', size=30, bold=True)
-  worksheet['A1'].alignment = Alignment(horizontal='center', vertical='center')
+  logo = padLogoImage('abi-logo.webp')
+  worksheet.add_image(logo, 'A1')
 
   worksheet.merge_cells('E1:F2')
   worksheet['E1'] = "45 CLAPBOARD HILL ROAD"
@@ -348,14 +390,15 @@ def addMainTable(worksheet, rooms, file):
         worksheet.merge_cells(f'I{row}:J{row}')
 
         supplier_string = getSupplier(st.session_state.details.iloc[pl-1].loc['Supplier'])
-        # supplier_string = "Patani Inc.>John Doe>john@example.com>123-456-7890"
         details = [item.strip() for item in supplier_string.split('>') if item.strip()]
         finalString = CellRichText(
           TextBlock(InlineFont(b=True), f'{details[0]}\n'),
           '\n'.join(details[1:])
         )
-
-        worksheet.add_image(images[pl-1], f'E{row}')
+        image = images[pl-1]
+        if image.width != 1:
+          image = padProductImage(image)
+        worksheet.add_image(image, f'E{row}')
 
         worksheet[f'I{row}'] = finalString
         worksheet[f'I{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
