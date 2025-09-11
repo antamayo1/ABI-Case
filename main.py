@@ -110,29 +110,29 @@ def padLogoImage(img):
   return img
 
 def padProductImage(image):
-    pil_img = PILImage.open(image.ref)
-    
-    padding_left = 40
-    padding_right = 40
-    padding_top = 20
-    padding_bottom = 20
-    
-    new_width = pil_img.width + padding_left + padding_right
-    new_height = pil_img.height + padding_top + padding_bottom
-    padded_img = PILImage.new('RGBA', (new_width, new_height), (255, 255, 255, 0))
-    
-    padded_img.paste(pil_img, (padding_left, padding_top), pil_img if pil_img.mode == 'RGBA' else None)
-    
-    buf = BytesIO()
-    padded_img.save(buf, format='PNG')
-    buf.seek(0)
-    
-    new_img = Image(buf)
+  pil_img = PILImage.open(image.ref)
+  
+  padding_left = 40
+  padding_right = 40
+  padding_top = 20
+  padding_bottom = 20
+  
+  new_width = pil_img.width + padding_left + padding_right
+  new_height = pil_img.height + padding_top + padding_bottom
+  padded_img = PILImage.new('RGBA', (new_width, new_height), (255, 255, 255, 0))
+  
+  padded_img.paste(pil_img, (padding_left, padding_top), pil_img if pil_img.mode == 'RGBA' else None)
+  
+  buf = BytesIO()
+  padded_img.save(buf, format='PNG')
+  buf.seek(0)
+  
+  new_img = Image(buf)
 
-    new_img.width = 182
-    new_img.height = 200
-    
-    return new_img
+  new_img.width = 182
+  new_img.height = 200
+  
+  return new_img
 
 def columnRowDimensions(worksheet):
   worksheet.column_dimensions['A'].width = 14.78 * 1.4
@@ -429,84 +429,105 @@ def addMainTable(worksheet, rooms, file):
         worksheet[f'A{row}'].fill = sec_fill
         row += 1
   worksheet = box_fill(worksheet, f'A7', f'K{row-1}')
+  worksheet.freeze_panes = 'A7'
   return worksheet
+
+@st.dialog("Log out")
+def user_info(name):
+  st.write(f'Hello, **{name}**!')
+  if st.button("Log out", type="primary", use_container_width=True):
+    st.logout()
 
 if not st.user.is_logged_in:
   with st.container(horizontal_alignment="center"):
     with st.container(border=True, horizontal_alignment="center", width=500):
-      st.image("LMC_Logo.jpeg")
-      st.title("Export to Schedule", width="content", anchor=False)
-      st.caption("Please Login to Continue", width="content")
+      st.image("abi-logo.webp")
+      st.title("Export to Schedule App", width="content", anchor=False)
+      st.text("Format to your needs.", width="content")
+      st.write('---')
       login_btn = st.button(
-        "**Log in** with **Google**",
+        "🔑 **Log in** with **Google**",
         use_container_width=True,
         type="primary"
       )
+      st.caption("Please Login to Continue", width="content")
       if login_btn:
         st.login()
-    st.markdown("""
-    <div style="text-align: center; color: #6c757d; font-size: 14px; margin-top: 30px;">
-      <p style="margin-bottom: 0px;"><strong>Export to Formatted Schedule Application</strong></p>
-      <a style="margin-bottom: 0px; text-decoration: none;" href="https://lernmoreconsulting.com">© 2025 LernMore Consulting</a>
-      <p>Secure • Fast • Accurate</p>
-    </div>
-    """, unsafe_allow_html=True)
 else:
   user_details = st.user.to_dict()
-  with st.container(border=True, horizontal=True, horizontal_alignment="distribute", height=73):
+
+  with st.container(border=False, horizontal=True, horizontal_alignment="distribute", height=150):
     with st.container(vertical_alignment="center", height="stretch"):
-      st.write("**Export to Schedule**")
-    logout_btn = st.button(
-      "Log out",
-      type="primary"
-    )
-    if logout_btn:
-      st.logout()
-  with st.expander("Upload Schedule", expanded=True):
-    st.session_state.input_file = st.file_uploader("Please input the raw export file", type=["xlsx", "xls"])
-  if st.session_state.input_file:
-    [projectName, ext] = st.session_state.input_file.name.split('-')
-    projectName = projectName.strip()
-    projectCategory = ext.split('Fohlio')[0].strip()
-    st.session_state.details = pd.read_excel(st.session_state.input_file, header=9)
-    st.session_state.rooms = {}
-    for idx, roomName in enumerate(st.session_state.details['Area']):
-      [main, sub] = roomName.split(' / ')
-      main_key = main[4:]
-      sub_key = sub[4:]
-      product = st.session_state.details['Product Type'][idx]
-      if main_key not in st.session_state.rooms:
-        st.session_state.rooms[main_key] = {sub_key: [product]}
-      else:
-        if sub_key not in st.session_state.rooms[main_key]:
-          st.session_state.rooms[main_key][sub_key] = [product]
-        else:
-          st.session_state.rooms[main_key][sub_key].append(product)
-    st.write(st.session_state.details)
-    newDataframe = pd.DataFrame()
-    output = BytesIO()
-    with st.spinner("Generating formatted Excel file..."):
-      with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        newDataframe.to_excel(writer, index=False, sheet_name=projectCategory)
-        worksheet = writer.sheets[projectCategory]
-        worksheet = createHeader(worksheet, projectName)
-        worksheet = addMainTable(worksheet, st.session_state.rooms, st.session_state.input_file)
-        worksheet.page_setup.fitToPage = True
-        worksheet.page_setup.fitToWidth = 1
-        worksheet.page_setup.fitToHeight = False
-        worksheet.page_margins.left = 0.2
-        worksheet.page_margins.right = 0.2
-        worksheet.page_margins.top = 0.2
-        worksheet.page_margins.bottom = 0.2
-        worksheet.page_setup.orientation = 'landscape'
-        worksheet.page_setup.paperSize = 9
-      output.seek(0)
-      st.session_state.output = output
-      st.download_button(
-        label="Download Formatted Excel File",
-        data=output,
-        file_name="test.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      st.image("abi-logo.webp", width=250)
+
+    with st.container(vertical_alignment="center", height="stretch", horizontal_alignment="right"):
+      logout_btn = st.button(
+        f"☰",
+        type="primary"
       )
-  else:
-    st.info("Please upload a schedule file to proceed.")
+      
+      if logout_btn:
+        user_info(user_details.get("name"))
+  with st.container(border=True):
+    st.header("Export to Formatted Schedule Application", anchor=False)
+    with st.expander("Upload Schedule", expanded=True):
+      st.session_state.input_file = st.file_uploader("Please input the raw export file", type=["xlsx", "xls"])
+    if st.session_state.input_file:
+      [projectName, ext] = st.session_state.input_file.name.split('-')
+      projectName = projectName.strip()
+      projectCategory = ext.split('Fohlio')[0].strip()
+      st.session_state.details = pd.read_excel(st.session_state.input_file, header=9)
+      st.session_state.rooms = {}
+      for idx, roomName in enumerate(st.session_state.details['Area']):
+        [main, sub] = roomName.split(' / ')
+        main_key = main[4:]
+        sub_key = sub[4:]
+        product = st.session_state.details['Product Type'][idx]
+        if main_key not in st.session_state.rooms:
+          st.session_state.rooms[main_key] = {sub_key: [product]}
+        else:
+          if sub_key not in st.session_state.rooms[main_key]:
+            st.session_state.rooms[main_key][sub_key] = [product]
+          else:
+            st.session_state.rooms[main_key][sub_key].append(product)
+      st.subheader(f"File Input Details", anchor=False)
+      st.write(f"**Project Name:** {projectName}")
+      st.write(f"**Project Category:** {projectCategory}")
+      st.write(st.session_state.details)
+      st.caption("Preview of the uploaded schedule file", width="content")
+      newDataframe = pd.DataFrame()
+      output = BytesIO()
+      with st.spinner("Please wait while we format your schedule..."):
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+          newDataframe.to_excel(writer, index=False, sheet_name=projectCategory)
+          worksheet = writer.sheets[projectCategory]
+          worksheet = createHeader(worksheet, projectName)
+          worksheet = addMainTable(worksheet, st.session_state.rooms, st.session_state.input_file)
+          worksheet.page_setup.fitToPage = True
+          worksheet.page_setup.fitToWidth = 1
+          worksheet.page_setup.fitToHeight = False
+          worksheet.page_margins.left = 0.2
+          worksheet.page_margins.right = 0.2
+          worksheet.page_margins.top = 0.2
+          worksheet.page_margins.bottom = 0.2
+          worksheet.page_setup.orientation = 'landscape'
+          worksheet.page_setup.paperSize = 9
+        output.seek(0)
+        st.session_state.output = output
+        st.download_button(
+          label="Download Formatted Excel File",
+          data=output,
+          file_name="test.xlsx",
+          mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          type="primary"
+        )
+    else:
+      st.info("Please upload a schedule file to proceed.")
+
+st.markdown("""
+<div style="text-align: center; color: #6c757d; font-size: 14px; margin-top: 30px;">
+  <p style="margin-bottom: 0px;"><strong>Export to Formatted Schedule Application</strong></p>
+  <a style="margin-bottom: 0px; text-decoration: none;" href="https://lernmoreconsulting.com">© 2025 LernMore Consulting</a>
+  <p>Secure • Fast • Accurate</p>
+</div>
+""", unsafe_allow_html=True)
