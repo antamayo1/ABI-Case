@@ -466,9 +466,10 @@ def addMainTable(worksheet, rooms, file, arranged_dataframe):
         pl += 1
         row += 1
       worksheet.merge_cells(f'A{start}:A{row-1}')
-      is_last_main = list(rooms.keys())[-1] == main
-      is_last_sub = list(subs.keys())[-1] == sub
-      if not (is_last_main or is_last_sub):
+      main_keys = list(rooms.keys())
+      sub_keys = list(subs.keys())
+      is_last_sub_in_main = sub_keys.index(sub) == len(sub_keys) - 1
+      if not is_last_sub_in_main:
         worksheet.merge_cells(f'A{row}:K{row}')
         worksheet.row_dimensions[row].height = 4.5
         worksheet[f'A{row}'].fill = sec_fill
@@ -583,10 +584,10 @@ else:
           worksheet.page_setup.fitToPage = True
           worksheet.page_setup.fitToWidth = 1
           worksheet.page_setup.fitToHeight = False
-          worksheet.page_margins.left = 0.2
-          worksheet.page_margins.right = 0.2
-          worksheet.page_margins.top = 0.2
-          worksheet.page_margins.bottom = 0.2
+          worksheet.page_margins.left = 0.25
+          worksheet.page_margins.right = 0.25
+          worksheet.page_margins.top = 0.75
+          worksheet.page_margins.bottom = 0.75
           worksheet.page_setup.orientation = 'landscape'
           worksheet.page_setup.paperSize = 3
         output.seek(0)
