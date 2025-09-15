@@ -380,13 +380,13 @@ def addMainTable(worksheet, rooms, file, arranged_dataframe):
       worksheet[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
       worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8)
       for product_type in subs[sub]:
-        (type_product, name_product) = product_type
+        (type_product, index_product) = product_type
         row_df = arranged_dataframe[
           arranged_dataframe['Area'].str.contains(main) &
-          arranged_dataframe['Area'].str.contains(sub) & 
-          (arranged_dataframe['Product Type'] == type_product) &
-          (arranged_dataframe['Product Name'] == name_product)
+          arranged_dataframe['Area'].str.contains(sub)
         ]
+        row_df = row_df[row_df['Image Index'] == index_product]
+
         if row_df.empty:
           continue
 
@@ -531,12 +531,12 @@ else:
         product = st.session_state.details['Product Type'][idx]
         product_name = st.session_state.details['Product Name'][idx]
         if main_key not in st.session_state.rooms:
-          st.session_state.rooms[main_key] = {sub_key: [(product, product_name)]}
+          st.session_state.rooms[main_key] = {sub_key: [(product, idx)]}
         else:
           if sub_key not in st.session_state.rooms[main_key]:
-            st.session_state.rooms[main_key][sub_key] = [(product, product_name)]
+            st.session_state.rooms[main_key][sub_key] = [(product, idx)]
           else:
-            st.session_state.rooms[main_key][sub_key].append((product, product_name))
+            st.session_state.rooms[main_key][sub_key].append((product, idx))
       st.session_state.room_order = list(st.session_state.rooms.keys())
 
       column1, column2 = st.columns([1, 3])
