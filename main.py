@@ -539,10 +539,11 @@ else:
             st.session_state.rooms[main_key][sub_key].append((product, idx))
       st.session_state.room_order = list(st.session_state.rooms.keys())
 
-      column1, column2 = st.columns([1, 3])
+      column1, column2, column3 = st.columns(3)
       with column1:
-        st.subheader("Rooms Order", anchor=False)
-        st.write("Drag and rearrange the rooms as needed for your export. The order will be reflected in the final formatted schedule.")
+
+        st.subheader("Floor Order", anchor=False)
+        st.caption("Drag and rearrange the rooms as needed for your export. The order will be reflected in the final formatted schedule.")
         new_order = sortables.sort_items(
           st.session_state.room_order,
           direction="vertical"
@@ -550,12 +551,37 @@ else:
 
         if new_order != st.session_state.room_order:
           st.session_state.room_order = new_order
-
       with column2:
+        st.subheader("Room Order", anchor=False)
+        st.session_state.selectedRoom = st.selectbox(
+          "Select a floor to view its rooms",
+          options=st.session_state.room_order,
+          index=0
+        )
+        if 'sub_room_orders' not in st.session_state:
+          st.session_state.sub_room_orders = {}
+        
+        current_sub_rooms = list(st.session_state.rooms[st.session_state.selectedRoom].keys())
+        
+        if st.session_state.selectedRoom not in st.session_state.sub_room_orders:
+          st.session_state.sub_room_orders[st.session_state.selectedRoom] = current_sub_rooms
+        
+        st.session_state.rooms_in_floor = st.session_state.sub_room_orders[st.session_state.selectedRoom]
+        
+        new_sub_order = sortables.sort_items(
+          st.session_state.rooms_in_floor,
+          direction="vertical"
+        )
+        
+        if new_sub_order != st.session_state.rooms_in_floor:
+          st.session_state.sub_room_orders[st.session_state.selectedRoom] = new_sub_order
+          st.session_state.rooms_in_floor = new_sub_order
+
+      with column3:
         st.subheader(f"File Input Details", anchor=False)
         st.write(f"**Project Name:** {projectName}")
         st.write(f"**Project Category:** {projectCategory}")
-        st.info("Note that the it detects the **Project Name** and **Project Category** by the filename _`<project_name> - <project_category> Fohlio Raw Export.xlsx`_", icon="ℹ️")
+        st.info("Note that the application detects the **Project Name** and **Project Category** by the filename _`<project_name> - <project_category> Fohlio Raw Export.xlsx`_", icon="ℹ️")
       
       st.write('---')
       st.session_state.details['Image Index'] = range(len(st.session_state.details))
@@ -572,6 +598,9 @@ else:
       for key in st.session_state.room_order:
         if key in st.session_state.rooms:
           ordered_rooms[key] = st.session_state.rooms[key]
+      for sub_key in new_sub_order:
+        if sub_key in ordered_rooms[st.session_state.selectedRoom]:
+          ordered_rooms[st.session_state.selectedRoom][sub_key] = ordered_rooms[st.session_state.selectedRoom].pop(sub_key)
 
       newDataframe = pd.DataFrame()
       output = BytesIO()
