@@ -10,6 +10,11 @@ from openpyxl.utils import coordinate_to_tuple, get_column_letter
 from io import BytesIO
 from functools import cache
 from PIL import Image as PILImage
+from collections import OrderedDict
+import streamlit_sortables as sortables
+
+MAX_MODEL_CHARACTERS_PER_COLUMN = 30
+MAX_SUPPLIER_CHARACTERS_PER_COLUMN = 24
 
 AI_outputs = {}
 
@@ -20,7 +25,20 @@ AI_client = OpenAI(
 fill = PatternFill(start_color="B8CCE4", end_color="B8CCE4", fill_type="solid")
 sec_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
 
-st.set_page_config(page_title="Design Transformer", layout="wide")
+st.set_page_config(page_title="Design Transformer", layout="wide", page_icon="https://images.squarespace-cdn.com/content/v1/64de080086e544329d5ae8ad/4cc35b7d-6693-4a6e-a547-736c1ebbc63a/favicon.ico?format=100w")
+
+def count_wrapped_lines(text, max_chars):
+  words = text.split()
+  lines = 1
+  current_len = 0
+  for word in words:
+    add_len = len(word) + (1 if current_len > 0 else 0)
+    if current_len + add_len > max_chars:
+      lines += 1
+      current_len = len(word)
+    else:
+      current_len += add_len
+  return lines
 
 def get_image_anchor(img):
   anchor = img.anchor
@@ -34,7 +52,7 @@ def get_image_anchor(img):
     return str(anchor)
 
 def create_blank_image():
-  img = PILImage.new('RGBA', (1, 1), (255, 255, 255, 0))  # 1x1 transparent
+  img = PILImage.new('RGBA', (1, 1), (255, 255, 255, 0))
   buf = BytesIO()
   img.save(buf, format='PNG')
   buf.seek(0)
@@ -109,13 +127,13 @@ def padLogoImage(img):
   img.height = 95
   return img
 
-def padProductImage(image):
+def padProductImage(image, row_height):
   pil_img = PILImage.open(image.ref)
   
-  padding_left = 40
-  padding_right = 40
-  padding_top = 20
-  padding_bottom = 20
+  padding_left = 5
+  padding_right = 5
+  padding_top = 5
+  padding_bottom = 5
   
   new_width = pil_img.width + padding_left + padding_right
   new_height = pil_img.height + padding_top + padding_bottom
@@ -130,7 +148,7 @@ def padProductImage(image):
   new_img = Image(buf)
 
   new_img.width = 182
-  new_img.height = 200
+  new_img.height = row_height * 1.325
   
   return new_img
 
@@ -339,7 +357,7 @@ def getSupplier(supplier):
 
   return response.choices[0].message.content
 
-def addMainTable(worksheet, rooms, file):
+def addMainTable(worksheet, rooms, file, arranged_dataframe):
   images = load_workbook(file).worksheets[0]._images[1:]
   total_rows = 0
   for room in rooms:
@@ -362,43 +380,64 @@ def addMainTable(worksheet, rooms, file):
       worksheet[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
       worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8)
       for product_type in subs[sub]:
+        (type_product, name_product) = product_type
+        row_df = arranged_dataframe[
+          arranged_dataframe['Area'].str.contains(main) &
+          arranged_dataframe['Area'].str.contains(sub) & 
+          (arranged_dataframe['Product Type'] == type_product) &
+          (arranged_dataframe['Product Name'] == name_product)
+        ]
+        if row_df.empty:
+          continue
+
+        brand = row_df.iloc[0].loc['Brand'] if pd.notna(row_df.iloc[0].loc['Brand']) else 'Not Provided'
+        name = row_df.iloc[0].loc['Product Name'] if pd.notna(row_df.iloc[0].loc['Product Name']) else 'Not Provided'
+        product_code = row_df.iloc[0].loc['Product Code #'] if pd.notna(row_df.iloc[0].loc['Product Code #']) else 'Not Provided'
+
+        brand_lines = count_wrapped_lines('BRAND: ' + brand, MAX_MODEL_CHARACTERS_PER_COLUMN)
+        name_lines = count_wrapped_lines('NAME: ' + name, MAX_MODEL_CHARACTERS_PER_COLUMN)
+        sku_lines = count_wrapped_lines('SKU: ' + product_code, MAX_MODEL_CHARACTERS_PER_COLUMN)
+
+        modelHeight = brand_lines + name_lines + sku_lines
+
         stringSample = CellRichText(
           TextBlock(InlineFont(b=True), 'BRAND: '),
-          f'{st.session_state.details.iloc[pl-1].loc['Brand'] if pd.notna(st.session_state.details.iloc[pl-1].loc['Brand']) else 'Not Provided'}\n',
+          f'{brand}\n',
           TextBlock(InlineFont(b=True), 'NAME: '),
-          f'{st.session_state.details.iloc[pl-1].loc['Product Name'] if pd.notna(st.session_state.details.iloc[pl-1].loc['Product Name']) else 'Not Provided'}\n',
+          f'{name}\n',
           TextBlock(InlineFont(b=True), 'SKU: '),
-          f'{st.session_state.details.iloc[pl-1].loc['Product Code #'] if pd.notna(st.session_state.details.iloc[pl-1].loc['Product Code #']) else 'Not Provided'}\n',
+          f'{product_code}',
         )
 
         worksheet[f'F{row}'] = stringSample
         worksheet[f'F{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'F{row}'].font = Font(name='Avenir Book', size=8)
 
-        worksheet[f'D{row}'] = st.session_state.details.iloc[pl-1].loc['QTY (per Area)']
+        worksheet[f'D{row}'] = row_df.iloc[0].loc['QTY (per Area)']
         worksheet[f'D{row}'].alignment = Alignment(horizontal='center', vertical='center')
         worksheet[f'D{row}'].font = Font(name='Avenir Book', size=8)
 
-        worksheet[f'H{row}'] = st.session_state.details.iloc[pl-1].loc['Finish/Color']
+        worksheet[f'H{row}'] = row_df.iloc[0].loc['Finish/Color']
         worksheet[f'H{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'H{row}'].font = Font(name='Avenir Book', size=8)
 
-        worksheet[f'G{row}'] = st.session_state.details.iloc[pl-1].loc['Dimension']
+        worksheet[f'G{row}'] = row_df.iloc[0].loc['Dimension']
         worksheet[f'G{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'G{row}'].font = Font(name='Avenir Book', size=8)
 
         worksheet.merge_cells(f'I{row}:J{row}')
 
-        supplier_string = getSupplier(st.session_state.details.iloc[pl-1].loc['Supplier'])
+        supplier_string = getSupplier(row_df.iloc[0].loc['Supplier'])
         details = [item.strip() for item in supplier_string.split('>') if item.strip()]
+        
+        supplierHeight = 0
+        for detail in details:
+          supplierHeight += count_wrapped_lines(detail, MAX_SUPPLIER_CHARACTERS_PER_COLUMN)
+
         finalString = CellRichText(
           TextBlock(InlineFont(b=True), f'{details[0]}\n'),
           '\n'.join(details[1:])
         )
-        image = images[pl-1]
-        if image.width != 1:
-          image = padProductImage(image)
-        worksheet.add_image(image, f'E{row}')
 
         worksheet[f'I{row}'] = finalString
         worksheet[f'I{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -412,12 +451,18 @@ def addMainTable(worksheet, rooms, file):
         worksheet[f'K{row}'].alignment = Alignment(horizontal='center', vertical='center')
         worksheet[f'K{row}'].font = Font(name='Avenir Book', size=8, italic=True)
 
-        worksheet[f'C{row}'] = product_type
+        (worksheet[f'C{row}'], _) = product_type
         worksheet[f'C{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         worksheet[f'C{row}'].font = Font(name='Avenir Book', size=8)
 
-        worksheet.row_dimensions[row].height = 150
+        max_lines = max(modelHeight, supplierHeight)
+        row_height = max(36, min(300, max_lines * 18))
 
+        worksheet.row_dimensions[row].height = row_height
+        image = images[row_df.iloc[0].loc["Image Index"]]
+        if image.width != 1:
+          image = padProductImage(image, row_height)
+        worksheet.add_image(image, f'E{row}')
         pl += 1
         row += 1
       worksheet.merge_cells(f'A{start}:A{row-1}')
@@ -473,7 +518,7 @@ else:
     with st.expander("Upload Schedule", expanded=True):
       st.session_state.input_file = st.file_uploader("Please input the raw export file", type=["xlsx", "xls"])
     if st.session_state.input_file:
-      [projectName, ext] = st.session_state.input_file.name.split('-')
+      [projectName, ext] = st.session_state.input_file.name.split('-', 1)
       projectName = projectName.strip()
       projectCategory = ext.split('Fohlio')[0].strip()
       st.session_state.details = pd.read_excel(st.session_state.input_file, header=9)
@@ -483,18 +528,50 @@ else:
         main_key = main[4:]
         sub_key = sub[4:]
         product = st.session_state.details['Product Type'][idx]
+        product_name = st.session_state.details['Product Name'][idx]
         if main_key not in st.session_state.rooms:
-          st.session_state.rooms[main_key] = {sub_key: [product]}
+          st.session_state.rooms[main_key] = {sub_key: [(product, product_name)]}
         else:
           if sub_key not in st.session_state.rooms[main_key]:
-            st.session_state.rooms[main_key][sub_key] = [product]
+            st.session_state.rooms[main_key][sub_key] = [(product, product_name)]
           else:
-            st.session_state.rooms[main_key][sub_key].append(product)
-      st.subheader(f"File Input Details", anchor=False)
-      st.write(f"**Project Name:** {projectName}")
-      st.write(f"**Project Category:** {projectCategory}")
+            st.session_state.rooms[main_key][sub_key].append((product, product_name))
+      st.session_state.room_order = list(st.session_state.rooms.keys())
+
+      column1, column2 = st.columns([1, 3])
+      with column1:
+        st.subheader("Rooms Order", anchor=False)
+        st.write("Drag and rearrange the rooms as needed for your export. The order will be reflected in the final formatted schedule.")
+        new_order = sortables.sort_items(
+          st.session_state.room_order,
+          direction="vertical"
+        )
+
+        if new_order != st.session_state.room_order:
+          st.session_state.room_order = new_order
+
+      with column2:
+        st.subheader(f"File Input Details", anchor=False)
+        st.write(f"**Project Name:** {projectName}")
+        st.write(f"**Project Category:** {projectCategory}")
+        st.info("Note that the it detects the **Project Name** and **Project Category** by the filename _`<project_name> - <project_category> Fohlio Raw Export.xlsx`_", icon="ℹ️")
+      
+      st.write('---')
+      st.session_state.details['Image Index'] = range(len(st.session_state.details))
+      st.session_state.details['main_area'] = st.session_state.details['Area'].apply(lambda x: x.split(' / ')[0][4:])
+      room_order_map = {room: i for i, room in enumerate(st.session_state.room_order)}
+      st.session_state.details['main_order'] = st.session_state.details['main_area'].map(room_order_map)
+      st.session_state.details = st.session_state.details.sort_values('main_order').reset_index(drop=True)
+      st.session_state.details = st.session_state.details.drop(columns=['main_area', 'main_order'])
+      st.subheader("File Input Preview", anchor=False)
+      st.write("You can preview the data extracted from your uploaded file below. This data will be used to generate the formatted schedule.")
       st.write(st.session_state.details)
-      st.caption("Preview of the uploaded schedule file", width="content")
+
+      ordered_rooms = OrderedDict()
+      for key in st.session_state.room_order:
+        if key in st.session_state.rooms:
+          ordered_rooms[key] = st.session_state.rooms[key]
+
       newDataframe = pd.DataFrame()
       output = BytesIO()
       with st.spinner("Please wait while we format your schedule..."):
@@ -502,7 +579,7 @@ else:
           newDataframe.to_excel(writer, index=False, sheet_name=projectCategory)
           worksheet = writer.sheets[projectCategory]
           worksheet = createHeader(worksheet, projectName)
-          worksheet = addMainTable(worksheet, st.session_state.rooms, st.session_state.input_file)
+          worksheet = addMainTable(worksheet, ordered_rooms, st.session_state.input_file, st.session_state.details)
           worksheet.page_setup.fitToPage = True
           worksheet.page_setup.fitToWidth = 1
           worksheet.page_setup.fitToHeight = False
@@ -511,13 +588,14 @@ else:
           worksheet.page_margins.top = 0.2
           worksheet.page_margins.bottom = 0.2
           worksheet.page_setup.orientation = 'landscape'
-          worksheet.page_setup.paperSize = 9
+          worksheet.page_setup.paperSize = 3
         output.seek(0)
         st.session_state.output = output
         st.download_button(
           label="Download Formatted Excel File",
           data=output,
-          file_name="test.xlsx",
+          use_container_width=True,
+          file_name=f"{projectName} - {projectCategory} Automated Export.xlsx",
           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           type="primary"
         )
