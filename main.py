@@ -384,13 +384,19 @@ def addMainTable(worksheet, rooms, file, arranged_dataframe):
     pl = 1
 
     for main, subs in rooms.items():
-        # Main section header
+        main_header_height = 18 
+
+        if current_page_height + main_header_height > AVAILABLE_HEIGHT_PER_PAGE:
+            worksheet.row_breaks.append(Break(id=row-1))
+            current_page_height = HEADER_HEIGHT
+            start = row
         worksheet.merge_cells(f'A{row}:K{row}')
         worksheet[f'A{row}'] = main
         worksheet[f'A{row}'].alignment = Alignment(horizontal='left', vertical='center')
         worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8, bold=True)
         worksheet[f'A{row}'].fill = sec_fill
         row += 1
+        current_page_height += main_header_height
 
         for sub in subs:
             start = row
@@ -481,7 +487,6 @@ def addMainTable(worksheet, rooms, file, arranged_dataframe):
                 max_lines = max(modelHeight, supplierHeight)
                 row_height = max(36, min(300, max_lines * 18))
 
-                # --- PAGE BREAK CHECK ---
                 if current_page_height + row_height > AVAILABLE_HEIGHT_PER_PAGE:
                     if start < row:
                         worksheet.merge_cells(f'A{start}:A{row-1}')
@@ -490,13 +495,11 @@ def addMainTable(worksheet, rooms, file, arranged_dataframe):
                     current_page_height = SUB_HEADER_HEIGHT
                     start = row
 
-                    # reprint sub label on new page
                     worksheet[f'A{row}'] = sub
                     worksheet[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
                     worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8)
                     worksheet.row_dimensions[row].height = SUB_HEADER_HEIGHT
 
-                # now add row
                 worksheet.row_dimensions[row].height = row_height
                 st.session_state.total_height += row_height
                 current_page_height += row_height
@@ -512,7 +515,6 @@ def addMainTable(worksheet, rooms, file, arranged_dataframe):
             if has_products and start < row:
                 worksheet.merge_cells(f'A{start}:A{row-1}')
 
-            # separator row between subs
             main_keys = list(rooms.keys())
             sub_keys = list(subs.keys())
             is_last_sub_in_main = sub_keys.index(sub) == len(sub_keys) - 1
