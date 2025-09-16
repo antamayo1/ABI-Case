@@ -12,10 +12,16 @@ from functools import cache
 from PIL import Image as PILImage
 from collections import OrderedDict
 import streamlit_sortables as sortables
+from openpyxl.styles import Alignment, Font
+from openpyxl.cell.rich_text import CellRichText, TextBlock, InlineFont
+from openpyxl.worksheet.pagebreak import Break
+import pandas as pd
 
 MAX_MODEL_CHARACTERS_PER_COLUMN = 30
 MAX_SUPPLIER_CHARACTERS_PER_COLUMN = 24
-
+AVAILABLE_HEIGHT_PER_PAGE = 720
+if 'total_height' not in st.session_state:
+  st.session_state.total_height = 0
 AI_outputs = {}
 
 AI_client = OpenAI(
@@ -168,6 +174,7 @@ def columnRowDimensions(worksheet):
   worksheet.row_dimensions[2].height = 18
   worksheet.row_dimensions[3].height = 18
   worksheet.row_dimensions[4].height = 18
+  st.session_state.total_height += (18 * 4) + 36
   return worksheet
 
 def headerBorders(worksheet):
@@ -358,125 +365,174 @@ def getSupplier(supplier):
   return response.choices[0].message.content
 
 def addMainTable(worksheet, rooms, file, arranged_dataframe):
-  images = load_workbook(file).worksheets[0]._images[1:]
-  total_rows = 0
-  for room in rooms:
-    for sub in rooms[room]:
-      for _ in rooms[room][sub]:
-        total_rows += 1
-  images = pad_images_with_blanks(images, total_rows)
-  row = 7
-  pl = 1
-  for main, subs in rooms.items():
-    worksheet.merge_cells(f'A{row}:K{row}')
-    worksheet[f'A{row}'] = main
-    worksheet[f'A{row}'].alignment = Alignment(horizontal='left', vertical='center')
-    worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8, bold=True)
-    worksheet[f'A{row}'].fill = sec_fill
-    row += 1
-    for sub in subs:
-      start = row
-      worksheet[f'A{row}'] = sub
-      worksheet[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
-      worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8)
-      for product_type in subs[sub]:
-        (type_product, index_product) = product_type
-        row_df = arranged_dataframe[
-          arranged_dataframe['Area'].str.contains(main) &
-          arranged_dataframe['Area'].str.contains(sub)
-        ]
-        row_df = row_df[row_df['Image Index'] == index_product]
+    st.session_state.pageStart = 0
+    images = load_workbook(file).worksheets[0]._images[1:]
+    total_rows = 0
+    for room in rooms:
+        for sub in rooms[room]:
+            for _ in rooms[room][sub]:
+                total_rows += 1
+    images = pad_images_with_blanks(images, total_rows)
 
-        if row_df.empty:
-          continue
+    # Tabloid (11x17), Landscape, Narrow margins
+    AVAILABLE_HEIGHT_PER_PAGE = 800   # tweak as needed
+    HEADER_HEIGHT = 108               # height of first-page header
+    SUB_HEADER_HEIGHT = 18            # height of sub labels
 
-        brand = row_df.iloc[0].loc['Brand'] if pd.notna(row_df.iloc[0].loc['Brand']) else 'Not Provided'
-        name = row_df.iloc[0].loc['Product Name'] if pd.notna(row_df.iloc[0].loc['Product Name']) else 'Not Provided'
-        product_code = row_df.iloc[0].loc['Product Code #'] if pd.notna(row_df.iloc[0].loc['Product Code #']) else 'Not Provided'
+    current_page_height = HEADER_HEIGHT
+    row = 7
+    pl = 1
 
-        brand_lines = count_wrapped_lines('BRAND: ' + brand, MAX_MODEL_CHARACTERS_PER_COLUMN)
-        name_lines = count_wrapped_lines('NAME: ' + name, MAX_MODEL_CHARACTERS_PER_COLUMN)
-        sku_lines = count_wrapped_lines('SKU: ' + product_code, MAX_MODEL_CHARACTERS_PER_COLUMN)
-
-        modelHeight = brand_lines + name_lines + sku_lines
-
-        stringSample = CellRichText(
-          TextBlock(InlineFont(b=True), 'BRAND: '),
-          f'{brand}\n',
-          TextBlock(InlineFont(b=True), 'NAME: '),
-          f'{name}\n',
-          TextBlock(InlineFont(b=True), 'SKU: '),
-          f'{product_code}',
-        )
-
-        worksheet[f'F{row}'] = stringSample
-        worksheet[f'F{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        worksheet[f'F{row}'].font = Font(name='Avenir Book', size=8)
-
-        worksheet[f'D{row}'] = row_df.iloc[0].loc['QTY (per Area)']
-        worksheet[f'D{row}'].alignment = Alignment(horizontal='center', vertical='center')
-        worksheet[f'D{row}'].font = Font(name='Avenir Book', size=8)
-
-        worksheet[f'H{row}'] = row_df.iloc[0].loc['Finish/Color']
-        worksheet[f'H{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        worksheet[f'H{row}'].font = Font(name='Avenir Book', size=8)
-
-        worksheet[f'G{row}'] = row_df.iloc[0].loc['Dimension']
-        worksheet[f'G{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        worksheet[f'G{row}'].font = Font(name='Avenir Book', size=8)
-
-        worksheet.merge_cells(f'I{row}:J{row}')
-
-        supplier_string = getSupplier(row_df.iloc[0].loc['Supplier'])
-        details = [item.strip() for item in supplier_string.split('>') if item.strip()]
-        
-        supplierHeight = 0
-        for detail in details:
-          supplierHeight += count_wrapped_lines(detail, MAX_SUPPLIER_CHARACTERS_PER_COLUMN)
-
-        finalString = CellRichText(
-          TextBlock(InlineFont(b=True), f'{details[0]}\n'),
-          '\n'.join(details[1:])
-        )
-
-        worksheet[f'I{row}'] = finalString
-        worksheet[f'I{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        worksheet[f'I{row}'].font = Font(name='Avenir Book', size=8)
-
-        worksheet[f'B{row}'] = f'PL-{pl}'
-        worksheet[f'B{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        worksheet[f'B{row}'].font = Font(name='Avenir Book', size=8)
-
-        worksheet[f'K{row}'] = 'SEE ID DRAWINGS & SPEC SHEETS FOR MORE INFORMATION'
-        worksheet[f'K{row}'].alignment = Alignment(horizontal='center', vertical='center')
-        worksheet[f'K{row}'].font = Font(name='Avenir Book', size=8, italic=True)
-
-        (worksheet[f'C{row}'], _) = product_type
-        worksheet[f'C{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        worksheet[f'C{row}'].font = Font(name='Avenir Book', size=8)
-
-        max_lines = max(modelHeight, supplierHeight)
-        row_height = max(36, min(300, max_lines * 18))
-
-        worksheet.row_dimensions[row].height = row_height
-        image = images[row_df.iloc[0].loc["Image Index"]]
-        if image.width != 1:
-          image = padProductImage(image, row_height)
-        worksheet.add_image(image, f'E{row}')
-        pl += 1
-        row += 1
-      worksheet.merge_cells(f'A{start}:A{row-1}')
-      main_keys = list(rooms.keys())
-      sub_keys = list(subs.keys())
-      is_last_sub_in_main = sub_keys.index(sub) == len(sub_keys) - 1
-      if not is_last_sub_in_main:
+    for main, subs in rooms.items():
+        # Main section header
         worksheet.merge_cells(f'A{row}:K{row}')
-        worksheet.row_dimensions[row].height = 4.5
+        worksheet[f'A{row}'] = main
+        worksheet[f'A{row}'].alignment = Alignment(horizontal='left', vertical='center')
+        worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8, bold=True)
         worksheet[f'A{row}'].fill = sec_fill
         row += 1
-  worksheet = box_fill(worksheet, f'A7', f'K{row-1}')
-  worksheet.freeze_panes = 'A7'
-  return worksheet
+
+        for sub in subs:
+            start = row
+            worksheet[f'A{row}'] = sub
+            worksheet[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
+            worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8)
+
+            has_products = False
+
+            for product_type in subs[sub]:
+                (type_product, index_product) = product_type
+                row_df = arranged_dataframe[
+                    arranged_dataframe['Area'].str.contains(main) &
+                    arranged_dataframe['Area'].str.contains(sub)
+                ]
+                row_df = row_df[row_df['Image Index'] == index_product]
+
+                if row_df.empty:
+                    continue
+
+                has_products = True
+
+                brand = row_df.iloc[0].loc['Brand'] if pd.notna(row_df.iloc[0].loc['Brand']) else 'Not Provided'
+                name = row_df.iloc[0].loc['Product Name'] if pd.notna(row_df.iloc[0].loc['Product Name']) else 'Not Provided'
+                product_code = row_df.iloc[0].loc['Product Code #'] if pd.notna(row_df.iloc[0].loc['Product Code #']) else 'Not Provided'
+
+                brand_lines = count_wrapped_lines('BRAND: ' + brand, MAX_MODEL_CHARACTERS_PER_COLUMN)
+                name_lines = count_wrapped_lines('NAME: ' + name, MAX_MODEL_CHARACTERS_PER_COLUMN)
+                sku_lines = count_wrapped_lines('SKU: ' + product_code, MAX_MODEL_CHARACTERS_PER_COLUMN)
+
+                modelHeight = brand_lines + name_lines + sku_lines
+
+                stringSample = CellRichText(
+                    TextBlock(InlineFont(b=True), 'BRAND: '),
+                    f'{brand}\n',
+                    TextBlock(InlineFont(b=True), 'NAME: '),
+                    f'{name}\n',
+                    TextBlock(InlineFont(b=True), 'SKU: '),
+                    f'{product_code}',
+                )
+
+                worksheet[f'F{row}'] = stringSample
+                worksheet[f'F{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                worksheet[f'F{row}'].font = Font(name='Avenir Book', size=8)
+
+                worksheet[f'D{row}'] = row_df.iloc[0].loc['QTY (per Area)']
+                worksheet[f'D{row}'].alignment = Alignment(horizontal='center', vertical='center')
+                worksheet[f'D{row}'].font = Font(name='Avenir Book', size=8)
+
+                worksheet[f'H{row}'] = row_df.iloc[0].loc['Finish/Color']
+                worksheet[f'H{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                worksheet[f'H{row}'].font = Font(name='Avenir Book', size=8)
+
+                worksheet[f'G{row}'] = row_df.iloc[0].loc['Dimension']
+                worksheet[f'G{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                worksheet[f'G{row}'].font = Font(name='Avenir Book', size=8)
+
+                worksheet.merge_cells(f'I{row}:J{row}')
+
+                supplier_string = getSupplier(row_df.iloc[0].loc['Supplier'])
+                details = [item.strip() for item in supplier_string.split('>') if item.strip()]
+
+                supplierHeight = 0
+                for detail in details:
+                    supplierHeight += count_wrapped_lines(detail, MAX_SUPPLIER_CHARACTERS_PER_COLUMN)
+
+                finalString = CellRichText(
+                    TextBlock(InlineFont(b=True), f'{details[0]}\n'),
+                    '\n'.join(details[1:])
+                )
+
+                worksheet[f'I{row}'] = finalString
+                worksheet[f'I{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                worksheet[f'I{row}'].font = Font(name='Avenir Book', size=8)
+
+                worksheet[f'B{row}'] = f'PL-{pl}'
+                worksheet[f'B{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                worksheet[f'B{row}'].font = Font(name='Avenir Book', size=8)
+
+                worksheet[f'K{row}'] = 'SEE ID DRAWINGS & SPEC SHEETS FOR MORE INFORMATION'
+                worksheet[f'K{row}'].alignment = Alignment(horizontal='center', vertical='center')
+                worksheet[f'K{row}'].font = Font(name='Avenir Book', size=8, italic=True)
+
+                (worksheet[f'C{row}'], _) = product_type
+                worksheet[f'C{row}'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                worksheet[f'C{row}'].font = Font(name='Avenir Book', size=8)
+
+                max_lines = max(modelHeight, supplierHeight)
+                row_height = max(36, min(300, max_lines * 18))
+
+                # --- PAGE BREAK CHECK ---
+                if current_page_height + row_height > AVAILABLE_HEIGHT_PER_PAGE:
+                    if start < row:
+                        worksheet.merge_cells(f'A{start}:A{row-1}')
+                    worksheet.row_breaks.append(Break(id=row-1))  # FIXED
+
+                    current_page_height = SUB_HEADER_HEIGHT
+                    start = row
+
+                    # reprint sub label on new page
+                    worksheet[f'A{row}'] = sub
+                    worksheet[f'A{row}'].alignment = Alignment(horizontal='center', vertical='center')
+                    worksheet[f'A{row}'].font = Font(name='Avenir Book', size=8)
+                    worksheet.row_dimensions[row].height = SUB_HEADER_HEIGHT
+
+                # now add row
+                worksheet.row_dimensions[row].height = row_height
+                st.session_state.total_height += row_height
+                current_page_height += row_height
+
+                image = images[row_df.iloc[0].loc["Image Index"]]
+                if image.width != 1:
+                    image = padProductImage(image, row_height)
+                worksheet.add_image(image, f'E{row}')
+
+                pl += 1
+                row += 1
+
+            if has_products and start < row:
+                worksheet.merge_cells(f'A{start}:A{row-1}')
+
+            # separator row between subs
+            main_keys = list(rooms.keys())
+            sub_keys = list(subs.keys())
+            is_last_sub_in_main = sub_keys.index(sub) == len(sub_keys) - 1
+            if not is_last_sub_in_main:
+                separator_height = 4.5
+                if current_page_height + separator_height > AVAILABLE_HEIGHT_PER_PAGE:
+                    worksheet.row_breaks.append(Break(id=row-1))  # FIXED
+                    current_page_height = separator_height
+                else:
+                    current_page_height += separator_height
+
+                worksheet.merge_cells(f'A{row}:K{row}')
+                worksheet.row_dimensions[row].height = separator_height
+                st.session_state.total_height += separator_height
+                worksheet[f'A{row}'].fill = sec_fill
+                row += 1
+
+    worksheet = box_fill(worksheet, f'A7', f'K{row-1}')
+    worksheet.freeze_panes = 'A7'
+    return worksheet
 
 @st.dialog("Log out")
 def user_info(name):
@@ -606,6 +662,7 @@ else:
       output = BytesIO()
       with st.spinner("Please wait while we format your schedule..."):
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
+          st.session_state.total_height = 0
           newDataframe.to_excel(writer, index=False, sheet_name=projectCategory)
           worksheet = writer.sheets[projectCategory]
           worksheet = createHeader(worksheet, projectName)
@@ -620,6 +677,7 @@ else:
           worksheet.page_setup.orientation = 'landscape'
           worksheet.page_setup.paperSize = 3
         output.seek(0)
+        print(st.session_state.total_height)
         st.session_state.output = output
         st.download_button(
           label="Download Formatted Excel File",
